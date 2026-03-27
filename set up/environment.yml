@@ -1,0 +1,26 @@
+name: tesi
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+    - nnunetv2
+    - torch
+    - torchvision
+    - torchaudio
+    - nibabel
+    - SimpleITK
+    - matplotlib
+    - jupyter
+    - pandas
+    - numpy
+    - scipy
+    - transformers
+    - accelerate
+    - anthropic
+    - openai
+    - ollama
+    - tqdm
+    - scikit-learn
