@@ -1,0 +1,44 @@
+# Semi-supervised experiment config
+# Inherits base.yaml — only overrides are listed here
+
+model:
+  model_type:   unet
+  in_channels:  1
+  num_classes:  3
+  features:     [32, 64, 128, 256, 512]
+  dropout:      0.1
+  img_size:     [96, 96, 96]
+
+loss:
+  loss_type:    tumor_focused
+  num_classes:  3
+  focal_gamma:  2.0
+  tumor_weight: 3.0
+
+optimizer:
+  lr:           0.0001
+  weight_decay: 0.00001
+
+training:
+  epochs:      300
+  val_every:   5
+  batch_size:  2
+  num_workers: 4
+
+data:
+  data_dir:       "/content/drive/MyDrive/tesi/data/nnunet_raw/Dataset007_Pancreas"
+  unlabeled_dir:  null    # extra unlabeled scans (optional)
+  val_fold:       0
+  num_folds:      5
+  cache_rate:     0.0
+  patch_size:     [96, 96, 96]
+
+semisup:
+  labeled_ratio:         0.10    # fraction of training cases with labels (10%)
+  ema_alpha:             0.999   # Mean Teacher EMA momentum
+  consistency_type:      mse     # 'mse' | 'kl'
+  consistency_weight:    1.0     # max weight for consistency loss
+  ramp_up_epochs:        40      # ramp up consistency weight over 40 epochs
+  use_pseudo_labels:     true
+  pseudo_weight:         0.5
+  confidence_threshold:  0.90    # min teacher confidence for pseudo-labels

@@ -1,0 +1,48 @@
+# Self-supervised MAE pretraining config
+
+model:
+  model_type:   unet
+  in_channels:  1
+  num_classes:  3
+  features:     [32, 64, 128, 256, 512]
+  dropout:      0.1
+  img_size:     [96, 96, 96]
+
+loss:
+  loss_type:    tumor_focused
+  num_classes:  3
+  focal_gamma:  2.0
+  tumor_weight: 3.0
+
+# MAE pretraining hyperparameters
+mae:
+  in_channels:  1
+  enc_features: [32, 64, 128, 256, 512]
+  dec_features: [256, 128, 64, 32]
+  patch_size:   16      # masking patch size in voxels
+  mask_ratio:   0.75    # fraction of patches masked
+
+optimizer:
+  lr:           0.001   # higher LR for pretraining
+  weight_decay: 0.05    # strong weight decay (MAE recommendation)
+
+training:
+  epochs:      200      # pretraining epochs
+  val_every:   20
+  batch_size:  4
+  num_workers: 4
+
+# Fine-tuning settings (after pretraining)
+finetune:
+  epochs:        300
+  lr:            0.0001
+  lr_multiplier: 10.0   # encoder LR = base_lr / lr_multiplier
+  val_every:     5
+
+data:
+  data_dir:       "/content/drive/MyDrive/tesi/data/nnunet_raw/Dataset007_Pancreas"
+  unlabeled_dir:  "/content/drive/MyDrive/tesi/data/unlabeled"  # extra CT scans
+  val_fold:       0
+  num_folds:      5
+  cache_rate:     0.0
+  patch_size:     [96, 96, 96]

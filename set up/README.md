@@ -1,142 +1,164 @@
-# Project Setup Guide
+# Pancreatic Tumor Segmentation — Master Thesis
+**Sugimoto Lab | Biomedical Engineering**
+
+Research Topic 3: *Pancreatic Tumor Segmentation with Low Estimation Accuracy and Limited Annotations*
+
+---
 
 ## Overview
 
-This project has two main components:
-1. **Pancreas segmentation** using nnUNet (pretrained model, fine-tuned on pancreas CT scans)
-2. **Report generation** using a local LLM (via Ollama) that describes the segmentation results
+This project implements and compares three annotation-efficient deep learning strategies for pancreatic tumor segmentation on CT images, addressing the dual challenge of low segmentation accuracy and annotation scarcity:
+
+1. **Semi-supervised learning** — Mean Teacher with pseudo-label generation (small labeled set + large unlabeled set)
+2. **Self-supervised pretraining** — 3D Masked Autoencoder (MAE) pretrained on unlabeled CT, then fine-tuned
+3. **Few-shot segmentation** — Prototypical Networks for rapid adaptation from K annotated examples
+
+All methods are evaluated against a fully supervised baseline using Dice, IoU, HD95, and volume error on the Medical Segmentation Decathlon Task07 (pancreas + tumor).
 
 ---
 
-## First-time setup (do this once)
-
-### 1. Create the conda environment
-The project requires Python 3.10 and several libraries. Run:
-```bash
-conda env create -f "set up/environment.yml"
-```
-
-### 2. Set environment variables
-nnUNet needs to know where to find data and save results.
-Add these lines to your `~/.zshrc` (or run them manually each session):
-```bash
-export nnUNet_raw="/Users/emmabattaglia/tesi/data/nnunet_raw"
-export nnUNet_preprocessed="/Users/emmabattaglia/tesi/data/nnunet_preprocessed"
-export nnUNet_results="/Users/emmabattaglia/tesi/data/nnunet_results"
-```
-Then reload: `source ~/.zshrc`
-
-### 3. Install Ollama
-Ollama is used to run the LLM locally.
-```bash
-brew install ollama
-```
-Then download your chosen model (e.g.):
-```bash
-ollama pull biomistral   # medical model, ~4GB
-ollama pull llama3.1     # general purpose
-```
-
----
-
-## Every time you work on the project
-
-### Activate the environment
-Always do this before running any script:
-```bash
-conda activate tesi
-```
-You will see `(tesi)` at the start of your terminal prompt.
-
-### Start Ollama (if using a local LLM)
-```bash
-ollama serve &
-```
-
-### Keep code up to date (if working across two computers)
-```bash
-git pull   # download latest changes from GitHub
-```
-
-### Push changes to GitHub after working
-```bash
-git add .
-git commit -m "description of what you changed"
-git push
-```
-
----
-
-## Project structure
+## Project Structure
 
 ```
 tesi/
-├── set up/
-│   ├── README.md            <- this file
-│   ├── environment.yml      <- conda dependencies
-│   └── setup_env.sh         <- environment variables to add to ~/.zshrc
+├── configs/                        ← YAML config file per experiment
+│   ├── supervised_baseline.yaml
+│   ├── semisup.yaml
+│   ├── selfsup_pretrain.yaml
+│   └── fewshot.yaml
 │
-├── data/                    <- ignored by git (too large)
-│   ├── nnunet_raw/          <- place the downloaded dataset here
-│   ├── nnunet_preprocessed/ <- filled automatically by nnUNet
-│   └── nnunet_results/      <- filled automatically by nnUNet (trained models)
+├── src/                            ← Core importable library
+│   ├── data/
+│   │   ├── dataset.py              ← Supervised, semi-sup, weak-label, few-shot datasets
+│   │   └── transforms.py          ← 3D CT augmentation pipelines (MONAI)
+│   ├── models/
+│   │   ├── unet.py                 ← 3D U-Net and Swin-UNETR backbone
+│   │   ├── masked_autoencoder.py   ← 3D MAE for self-supervised pretraining
+│   │   └── prototype_net.py        ← Prototypical network for few-shot segmentation
+│   ├── losses/
+│   │   ├── dice_ce.py              ← Dice + CE and tumor-focused focal loss
+│   │   ├── partial_ce.py          ← Masked CE for weak/scribble annotations
+│   │   └── consistency.py         ← Mean Teacher EMA + pseudo-label loss
+│   ├── training/
+│   │   ├── trainer_supervised.py   ← Baseline fully supervised trainer
+│   │   ├── trainer_semisup.py      ← Semi-supervised Mean Teacher trainer
+│   │   ├── trainer_selfsup.py      ← MAE pretrainer + fine-tuner
+│   │   └── trainer_fewshot.py      ← Episodic few-shot trainer
+│   ├── evaluation/
+│   │   └── metrics.py              ← Dice, IoU, HD95, ASSD, volume error
+│   └── utils/
+│       └── io.py                   ← NIfTI I/O, checkpoint save/load, config loader
 │
-├── segmentation/
-│   ├── 01_prepare_dataset.py  <- converts Task07_Pancreas to nnUNet format
-│   ├── 02_train.py            <- runs nnUNet preprocessing / training / inference
-│   └── 03_evaluate.py         <- computes Dice score and volume error
+├── scripts/                        ← CLI entry points (for SLURM cluster)
+│   ├── 02_pretrain_selfsup.py
+│   └── 03_train_semisup.py
 │
-├── llm/
-│   └── generate_report.py     <- generates radiology report from segmentation metrics
+├── notebooks/
+│   └── 00_colab_train.ipynb        ← All-in-one Colab training notebook
 │
-└── pipeline/
-    └── run_pipeline.py        <- runs the full pipeline end-to-end
+├── slurm/                          ← SLURM job scripts for university GPU cluster
+│   ├── pretrain_selfsup.sh
+│   └── train_semisup.sh
+│
+├── segmentation/                   ← Legacy nnUNet pipeline (kept as reference)
+├── llm/                            ← LLM report generation (Ollama / Claude API)
+├── pipeline/                       ← End-to-end pipeline
+├── data/                           ← Ignored by git (too large)
+│   ├── Task07_Pancreas/
+│   ├── nnunet_raw/
+│   └── unlabeled/
+└── experiments/                    ← Ignored by git (checkpoints, logs)
 ```
 
 ---
 
-## Workflow (step by step)
+## Setup
 
-| Step | Where | Script / Command |
-|------|--------|-----------------|
-| 1. Download dataset | local | medicaldecathlon.com → Task07_Pancreas |
-| 2. Convert dataset | local | `python segmentation/01_prepare_dataset.py` |
-| 3. Preprocess | university GPU | `python segmentation/02_train.py preprocess` |
-| 4. Train nnUNet | university GPU | `python segmentation/02_train.py train` |
-| 5. Run inference | university GPU | `python segmentation/02_train.py inference <in> <out>` |
-| 6. Evaluate | local or GPU | `python segmentation/03_evaluate.py <pred> <gt>` |
-| 7. Generate reports | local | `python llm/generate_report.py` |
-| 8. Full pipeline | local or GPU | `python pipeline/run_pipeline.py` |
+### Option A — Google Colab (recommended for development)
+
+Open `notebooks/00_colab_train.ipynb` in Colab, mount your Drive, and run. The notebook handles installation automatically.
+
+```
+Runtime → Change runtime type → A100 GPU (Colab Pro)
+```
+
+### Option B — University GPU cluster (recommended for full training runs)
+
+```bash
+# 1. Clone the repo on the cluster
+git clone https://github.com/emma162002/tesi.git
+cd tesi
+
+# 2. Create the conda environment
+conda env create -f "set up/environment.yml"
+conda activate tesi
+
+# 3. Set nnUNet environment variables (add to ~/.bashrc)
+export nnUNet_raw="$HOME/tesi/data/nnunet_raw"
+export nnUNet_preprocessed="$HOME/tesi/data/nnunet_preprocessed"
+export nnUNet_results="$HOME/tesi/data/nnunet_results"
+
+# 4. Submit a job
+sbatch slurm/train_semisup.sh
+```
+
+### Option C — Local machine (debugging only)
+
+```bash
+conda env create -f "set up/environment.yml"
+conda activate tesi
+python scripts/03_train_semisup.py --config configs/semisup.yaml --output experiments/semisup
+```
 
 ---
 
-## Future work & thesis ideas
+## Workflow
 
-### Segmentation
+| Step | Where | How |
+|------|-------|-----|
+| 1. Download dataset | Local | medicaldecathlon.com → Task07_Pancreas |
+| 2. Convert to nnUNet format | Local | `python segmentation/01_prepare_dataset.py` |
+| 3. Train supervised baseline | Cluster / Colab | `EXPERIMENT = 'supervised'` in notebook |
+| 4. Pretrain MAE (self-supervised) | Cluster | `sbatch slurm/pretrain_selfsup.sh` |
+| 5. Fine-tune on labeled data | Cluster / Colab | `EXPERIMENT = 'selfsup_finetune'` |
+| 6. Train semi-supervised | Cluster | `sbatch slurm/train_semisup.sh` |
+| 7. Train few-shot model | Cluster / Colab | `EXPERIMENT = 'fewshot'` |
+| 8. Compare all methods | Local / Colab | `scripts/06_compare_methods.py` (TODO) |
+| 9. Generate LLM reports | Local | `python llm/generate_report.py` |
 
-- **Compare fine-tuning strategies** — full fine-tuning vs. freezing the encoder vs. LoRA-style adapters. Which gives the best Dice with limited data?
-- **Data augmentation** — nnUNet already does augmentation, but you can experiment with custom strategies (elastic deformations, intensity shifts) for pancreas-specific challenges
-- **Uncertainty estimation** — use nnUNet's test-time augmentation or MC Dropout to produce confidence maps alongside the segmentation. This is clinically relevant and makes for a strong thesis contribution
-- **Multi-class segmentation** — Task07 has two labels (pancreas + cancer). Evaluating both separately and showing the model handles tumor detection is a nice result
-- **External validation** — if you can get access to a second dataset (e.g. NIH Pancreas-CT, 82 cases), testing on it shows generalization
+---
 
-### Report generation (LLM)
+## Experiments
 
-- **Prompt engineering** — try different prompt structures and compare output quality. Simple changes in wording can have a big effect
-- **Model comparison** — benchmark at least two models (e.g. BioMistral 7B vs. Meditron 70B or LLaMA 3.1) on the same inputs and compare reports qualitatively
-- **Structured vs. free-text output** — experiment with asking the LLM to return JSON (volume, findings, conclusion) vs. plain prose. Structured output is easier to evaluate automatically
-- **Hallucination detection** — check if the LLM invents findings not supported by the segmentation metrics. This is an open problem and worth discussing in the thesis
-- **Human evaluation** — ask a radiologist (or your supervisor) to rate a sample of generated reports on accuracy, fluency, and clinical usefulness. Even 20-30 cases is enough for a meaningful evaluation
+Each experiment has its own config in `configs/` and saves output to `experiments/<name>/`:
 
-### Pipeline & evaluation
+| Experiment | Config | Key hyperparameter |
+|------------|--------|--------------------|
+| Supervised baseline | `supervised_baseline.yaml` | 100% labeled data |
+| Semi-supervised | `semisup.yaml` | `labeled_ratio: 0.10` (10%) |
+| Self-supervised pretrain | `selfsup_pretrain.yaml` | `mask_ratio: 0.75` |
+| Few-shot | `fewshot.yaml` | `n_shot: 5` |
 
-- **End-to-end evaluation metric** — define a combined score that rewards both good segmentation (Dice) and good report quality (e.g. BLEU, BERTScore, or human rating)
-- **Visualization** — add a script that overlays the segmentation mask on the CT slice and saves a figure. Useful for the thesis document and for sanity-checking results
-- **DICOM support** — the current pipeline uses NIfTI. Supporting DICOM input makes it more realistic for clinical use
+To resume training after a Colab session drop, set `RESUME_FROM` in the notebook to the last saved checkpoint path.
 
-### What makes a strong thesis
+---
 
-- **Clear baseline** — always compare against the pretrained nnUNet without fine-tuning. Your contribution needs a reference point
-- **Ablation study** — change one thing at a time (e.g. number of training cases, fine-tuning epochs) and show the effect on Dice score
-- **Error analysis** — show cases where the model fails and explain why. This shows depth of understanding
-- **Clinical context** — briefly explain why pancreas segmentation is hard (small size, low contrast, variable shape) and why automation matters
+## Monitoring
+
+TensorBoard logs are saved to `experiments/<name>/logs/`. In Colab:
+
+```python
+%load_ext tensorboard
+%tensorboard --logdir /content/drive/MyDrive/tesi/experiments
+```
+
+---
+
+## Data
+
+The project uses the **Medical Segmentation Decathlon Task07_Pancreas** dataset:
+- 281 abdominal CT scans with pancreas + tumor annotations
+- Labels: 0 = background, 1 = pancreas parenchyma, 2 = tumor
+- Download: [medicaldecathlon.com](http://medicaldecathlon.com)
+
+Place the downloaded folder at `data/Task07_Pancreas/`, then run `segmentation/01_prepare_dataset.py` to convert it to the required format.
